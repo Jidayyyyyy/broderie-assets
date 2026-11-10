@@ -22,11 +22,13 @@ const FONT_CSS = 'https://fonts.googleapis.com/css2?family=Fahkwang:wght@500&fam
 
 // Polices de broderie proposées par défaut (points dans fonts/<id>.json) ; surchargeables par config.fonts
 const DEFAULT_FONTS = [
-  // Polices d'Anaïs, numérisées automatiquement par tools/build_fonts.sh
+  // Alphabet brodé par la machine d'Anaïs (tools/export_pes_font.py) : les points sont ceux de son logiciel
+  { id: 'julian', label: 'Julian', family: 'system-ui', weight: 400, stitches: 'julian.json' },
+  // Polices d'Anaïs, numérisées automatiquement par tools/build_fonts.sh (noms d'atelier : la police d'origine n'est pas montrée)
   { id: 'noteworthy', label: 'Noteworthy', family: 'Noteworthy', weight: 400, stitches: 'noteworthy.json' },
   { id: 'odstemplik', label: 'Odstemplik', family: 'system-ui', weight: 400, stitches: 'odstemplik.json' },
-  { id: 'unicorn-calligraphy', label: 'Unicorn Calligraphy', family: 'system-ui', weight: 400, stitches: 'unicorn-calligraphy.json' },
-  { id: 'vampire-calligraphy', label: 'Vampire Calligraphy', family: 'system-ui', weight: 400, stitches: 'vampire-calligraphy.json' },
+  { id: 'leandro', label: 'Leandro', family: 'system-ui', weight: 400, stitches: 'leandro.json' },
+  { id: 'jokin', label: 'Jokin', family: 'system-ui', weight: 400, stitches: 'jokin.json' },
 ];
 
 // Nuancier Madeira Rayon (réf|nom|couleur approchée), d'après la palette Ink/Stitch « Madeira Rayon »
