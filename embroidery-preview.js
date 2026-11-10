@@ -25,8 +25,8 @@ const DEFAULT_FONTS = [
   // Alphabet brodé par la machine d'Anaïs (tools/export_pes_font.py) : les points sont ceux de son logiciel
   { id: 'julian', label: 'Julian', family: 'system-ui', weight: 400, stitches: 'julian.json' },
   // Polices d'Anaïs, numérisées automatiquement par tools/build_fonts.sh (noms d'atelier : la police d'origine n'est pas montrée)
-  { id: 'noteworthy', label: 'Noteworthy', family: 'Noteworthy', weight: 400, stitches: 'noteworthy.json' },
-  { id: 'odstemplik', label: 'Odstemplik', family: 'system-ui', weight: 400, stitches: 'odstemplik.json' },
+  { id: 'alma', label: 'Alma', family: 'system-ui', weight: 400, stitches: 'alma.json' },
+  { id: 'luken', label: 'Luken', family: 'system-ui', weight: 400, stitches: 'luken.json' },
   { id: 'leandro', label: 'Leandro', family: 'system-ui', weight: 400, stitches: 'leandro.json' },
   { id: 'jokin', label: 'Jokin', family: 'system-ui', weight: 400, stitches: 'jokin.json' },
 ];
@@ -1185,9 +1185,10 @@ class EmbroideryPreview extends HTMLElement {
       const [x0, y0, x1, y1] = design.bbox;
       const s = Math.min((w * 0.9) / Math.max(x1 - x0, 1), (h * 0.8) / Math.max(y1 - y0, 1));
       const ox = (w - (x1 - x0) * s) / 2 - x0 * s, oy = (h - (y1 - y0) * s) / 2 - y0 * s;
+      // Traits élargis pour que les points se rejoignent : la lettre apparaît pleine, comme une police normale
       ctx.strokeStyle = ink;
-      ctx.lineCap = 'round';
-      ctx.lineWidth = Math.max(0.6, THREAD_MM * s * 0.8);
+      ctx.lineCap = ctx.lineJoin = 'round';
+      ctx.lineWidth = Math.max(1.2, THREAD_MM * s * 1.5);
       ctx.beginPath();
       const g = design.segs;
       for (let i = 0; i < g.length; i += 4) {
@@ -1370,7 +1371,7 @@ class EmbroideryPreview extends HTMLElement {
       const lc = layer.getContext('2d');
       lc.strokeStyle = this._color().hex;
       lc.lineCap = lc.lineJoin = 'round';
-      lc.lineWidth = Math.max(0.8, r * 2);
+      lc.lineWidth = Math.max(1.2, r * 3); // assez large pour que la lettre soit pleine
       lc.beginPath();
       const g = design.segs;
       for (let i = 0; i < g.length; i += 4) {
