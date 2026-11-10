@@ -675,9 +675,6 @@ textarea::placeholder, input::placeholder { color:#7f7064; }
 .font-card .tick { position:absolute; top:6px; right:6px; width:18px; height:18px; border-radius:50%; background:var(--ep-accent); color:var(--ep-surface); display:none; place-items:center; }
 .font-card .tick svg { width:12px; height:12px; stroke-width:2.2; }
 .font-card[aria-pressed="true"] .tick { display:grid; }
-.thread-current { display:flex; align-items:center; gap:12px; }
-.thread-current i { width:40px; height:40px; border-radius:50%; box-shadow:inset 0 0 0 1px rgba(0,0,0,.12); flex:none; }
-.thread-current b { font-weight:600; display:block; } .thread-current small { display:block; color:var(--ep-muted); font-size:12.5px; }
 .swatches { display:flex; flex-wrap:wrap; gap:8px; }
 .swatch { width:44px; height:44px; padding:0; border-radius:50%; border:3px solid var(--ep-surface); box-shadow:0 0 0 1px rgba(91,77,67,.25);
   cursor:pointer; flex:none; }
@@ -816,6 +813,8 @@ class EmbroideryPreview extends HTMLElement {
       defaultText: typeof c.defaultText === 'string' ? c.defaultText : '',
       accent: c.accent || null,
       fontsBaseUrl: c.fontsBaseUrl || null,
+      // Aperçu : 'flat' = la police en aplat, couleur du fil ; 'threads' = rendu des points brodés (relief, ombres)
+      render: c.render === 'threads' ? 'threads' : 'flat',
       caption: typeof c.caption === 'string' ? c.caption : 'Aperçu indicatif : chaque pièce est personnalisée à la main dans notre atelier.',
       // Marque des fils, reprise dans le récapitulatif de commande (nuancier par défaut : Madeira Rayon)
       threadBrand: c.threadBrand ?? (Array.isArray(c.colors) && c.colors.length ? '' : 'Madeira Rayon'),
@@ -984,7 +983,7 @@ class EmbroideryPreview extends HTMLElement {
     const attrs = (key, it) => `data-group="${key}" data-id="${escapeHtml(it.id)}"`;
     const head = (title, value = '') => `<div class="step-head"><h3 class="step-title">${title}</h3><span class="step-value" data-value="${value}"></span></div>`;
     const swatch = (col) =>
-      `<button type="button" class="swatch" ${attrs('colorId', col)} data-search="${escapeHtml(normalize(`${col.label} ${colorFamily(col.hex)}`))}" style="background:${escapeHtml(col.hex)}" aria-label="${escapeHtml(col.label)}" title="${escapeHtml(col.label)}"></button>`;
+      `<button type="button" class="swatch" ${attrs('colorId', col)} data-search="${escapeHtml(normalize(`${col.label} ${colorFamily(col.hex)}`))}" style="background:${escapeHtml(col.hex)}" aria-label="Fil ${escapeHtml(colorFamily(col.hex).split(' ')[0])}"></button>`;
     const popular = c.colors.filter((col) => c.popularColors.includes(col.id));
 
     this._controls.innerHTML = `
@@ -1022,12 +1021,11 @@ class EmbroideryPreview extends HTMLElement {
       </section>
       <section class="step tech-broderie">
         ${head('Couleur du fil')}
-        <div class="thread-current"><i></i><div><b></b><small>${escapeHtml(c.threadBrand)}</small></div></div>
         ${popular.length ? `<p class="label">Les plus demandées</p><div class="swatches">${popular.map(swatch).join('')}</div>` : ''}
         <details class="palette" ${popular.length ? '' : 'open'}>
           <summary>Tout le nuancier <span class="hint">${c.colors.length} couleurs</span></summary>
           <div class="palette-body">
-            ${c.colors.length > 24 ? '<input type="search" id="thread-search" placeholder="Référence, couleur (rose, bleu…) ou nom anglais" aria-label="Chercher une couleur de fil par référence, couleur ou nom anglais" autocomplete="off">' : ''}
+            ${c.colors.length > 24 ? '<input type="search" id="thread-search" placeholder="Chercher une couleur (rose, bleu…)" aria-label="Chercher une couleur de fil" autocomplete="off">' : ''}
             <div class="swatches all">${c.colors.map(swatch).join('')}</div>
             <p class="empty" hidden>Aucune couleur ne correspond.</p>
           </div>
@@ -1129,10 +1127,6 @@ class EmbroideryPreview extends HTMLElement {
     const first = steps.find((el) => !el.hidden && !el.hasAttribute('data-hide'));
     steps.forEach((el) => el.classList.toggle('first', el === first));
 
-    // Fil
-    q('.thread-current i').style.background = color.hex;
-    q('.thread-current b').textContent = color.label;
-
     // Logo
     const file = q('.file');
     file.hidden = !this._logo;
@@ -1154,17 +1148,15 @@ class EmbroideryPreview extends HTMLElement {
 
     // Récapitulatif
     const rows = [['Technique', technique.label], ['Emplacement', where]];
-    const [ref, ...nameParts] = color.label.split(' · ');
-    const colorName = nameParts.join(' · ') || color.label;
     if (dtf) rows.push(['Logo', this._logo ? this._logo.name : 'À ajouter']);
     else rows.push(['Texte', this._lines().join(' / ') || 'À saisir'], ['Police', font.label],
-      ['Couleur du fil', { html: `<i style="background:${escapeHtml(color.hex)}"></i>${escapeHtml(colorName)}${nameParts.length ? `<small>${escapeHtml([c.threadBrand, ref].filter(Boolean).join(' '))}</small>` : ''}` }]);
+      ['Couleur du fil', { html: `<i style="background:${escapeHtml(color.hex)}"></i>` }]);
     rows.push(['Taille', size.label]);
     q('.recap dl').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v.html ?? escapeHtml(v)}</dd>`).join('');
     // Résumé d'une ligne sous l'aperçu (mobile)
     this._live.textContent = (dtf
       ? [this._logo?.name || 'Ajoutez votre logo', where]
-      : [this._lines().join(' / ') || 'Saisissez votre texte', font.label, colorName, where]).join(' · ');
+      : [this._lines().join(' / ') || 'Saisissez votre texte', font.label, where]).join(' · ');
 
     this._drawFontThumbs();
   }
@@ -1371,6 +1363,27 @@ class EmbroideryPreview extends HTMLElement {
     const r = (THREAD_MM / 2) * s;
     const pad = r * 3 + 2;
     const lw = Math.ceil(mmW * s + pad * 2), lh = Math.ceil(mmH * s + pad * 2);
+
+    if (this._config.render === 'flat') {
+      // Les points tracés comme des traits pleins de l'épaisseur du fil : la forme exacte de la police, sans relief
+      const layer = mkCanvas(lw, lh);
+      const lc = layer.getContext('2d');
+      lc.strokeStyle = this._color().hex;
+      lc.lineCap = lc.lineJoin = 'round';
+      lc.lineWidth = Math.max(0.8, r * 2);
+      lc.beginPath();
+      const g = design.segs;
+      for (let i = 0; i < g.length; i += 4) {
+        lc.moveTo((g[i] - x0) * s + pad, (g[i + 1] - y0) * s + pad);
+        lc.lineTo((g[i + 2] - x0) * s + pad, (g[i + 3] - y0) * s + pad);
+      }
+      lc.stroke();
+      // Ombre légère, pour qu'un fil clair reste lisible sur un tissu clair
+      this._compose(ctx, layer, lw, lh, cx, cy, rot, CW, CH, false, {
+        shadow: 'rgba(0,0,0,0.25)', blur: Math.max(1, r), offset: 0, shade: 0,
+      });
+      return;
+    }
 
     // 3. Rendu des fils, sur-échantillonné pour que chaque fil fasse plusieurs pixels de large
     this._renderer ??= new StitchRenderer();
