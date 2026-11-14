@@ -23,7 +23,7 @@ const FONT_CSS = 'https://fonts.googleapis.com/css2?family=Fahkwang:wght@500&fam
 // Polices de broderie proposées par défaut (points dans fonts/<id>.json) ; surchargeables par config.fonts
 const DEFAULT_FONTS = [
   // Alphabet brodé par la machine d'Anaïs (tools/export_pes_font.py) : les points sont ceux de son logiciel
-  { id: 'julian', label: 'Julian', family: 'system-ui', weight: 400, stitches: 'julian.json' },
+  { id: 'julian', label: 'Julian', family: 'system-ui', weight: 400, stitches: 'julian.json', stroke: 0.8 },
   // Polices d'Anaïs, numérisées automatiquement par tools/build_fonts.sh (noms d'atelier : la police d'origine n'est pas montrée)
   { id: 'alma', label: 'Alma', family: 'system-ui', weight: 400, stitches: 'alma.json' },
   { id: 'luken', label: 'Luken', family: 'system-ui', weight: 400, stitches: 'luken.json' },
@@ -1185,10 +1185,11 @@ class EmbroideryPreview extends HTMLElement {
       const [x0, y0, x1, y1] = design.bbox;
       const s = Math.min((w * 0.9) / Math.max(x1 - x0, 1), (h * 0.8) / Math.max(y1 - y0, 1));
       const ox = (w - (x1 - x0) * s) / 2 - x0 * s, oy = (h - (y1 - y0) * s) / 2 - y0 * s;
-      // Traits élargis pour que les points se rejoignent : la lettre apparaît pleine, comme une police normale
+      // Traits élargis pour que les points se rejoignent : la lettre apparaît pleine, comme une police normale.
+      // font.stroke règle cette largeur par police (Julian, déjà dense, garde des traits fins)
       ctx.strokeStyle = ink;
       ctx.lineCap = ctx.lineJoin = 'round';
-      ctx.lineWidth = Math.max(1.2, THREAD_MM * s * 1.5);
+      ctx.lineWidth = Math.max(0.6, THREAD_MM * s * (font.stroke ?? 1.5));
       ctx.beginPath();
       const g = design.segs;
       for (let i = 0; i < g.length; i += 4) {
