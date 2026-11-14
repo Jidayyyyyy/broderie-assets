@@ -25,10 +25,13 @@ const DEFAULT_FONTS = [
   // Alphabet brodé par la machine d'Anaïs (tools/export_pes_font.py) : les points sont ceux de son logiciel
   { id: 'julian', label: 'Julian', family: 'system-ui', weight: 400, stitches: 'julian.json', stroke: 0.8 },
   // Polices d'Anaïs, numérisées automatiquement par tools/build_fonts.sh (noms d'atelier : la police d'origine n'est pas montrée)
-  { id: 'alma', label: 'Alma', family: 'system-ui', weight: 400, stitches: 'alma.json' },
-  { id: 'luken', label: 'Luken', family: 'system-ui', weight: 400, stitches: 'luken.json' },
+  { id: 'romane', label: 'Romane', family: 'system-ui', weight: 400, stitches: 'romane.json' },
+  { id: 'milan', label: 'Milan', family: 'system-ui', weight: 400, stitches: 'milan.json' },
+  { id: 'alice', label: 'Alice', family: 'system-ui', weight: 400, stitches: 'alice.json' },
   { id: 'leandro', label: 'Leandro', family: 'system-ui', weight: 400, stitches: 'leandro.json' },
   { id: 'jokin', label: 'Jokin', family: 'system-ui', weight: 400, stitches: 'jokin.json' },
+  { id: 'alma', label: 'Alma', family: 'system-ui', weight: 400, stitches: 'alma.json' },
+  { id: 'luken', label: 'Luken', family: 'system-ui', weight: 400, stitches: 'luken.json' },
 ];
 
 // Nuancier Madeira Rayon (réf|nom|couleur approchée), d'après la palette Ink/Stitch « Madeira Rayon »
@@ -132,6 +135,8 @@ const ICONS = {
   file: svg('<path d="M14 3.5H7a1.5 1.5 0 0 0-1.5 1.5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8L14 3.5Z"/><path d="M14 3.5V8h4.5"/>'),
   close: svg('<path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/>'),
   check: svg('<path d="m6 12.5 4 4 8-9"/>'),
+  minus: svg('<path d="M6 12h12"/>'),
+  plus: svg('<path d="M12 6v12M6 12h12"/>'),
 };
 
 // Famille de couleur en français, déduite de la teinte : la recherche « rose », « bleu »… fonctionne sur un nuancier en anglais
@@ -584,6 +589,53 @@ const normalize = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, 
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+// Description et sections d'infos du produit (texte riche Wix) : on garde la mise en forme, sans script ni attribut actif
+function cleanHtml(html) {
+  const doc = new DOMParser().parseFromString(`<div>${html || ''}</div>`, 'text/html');
+  doc.querySelectorAll('script, style, iframe, object, embed, form, link, meta').forEach((el) => el.remove());
+  doc.querySelectorAll('*').forEach((el) => {
+    for (const a of [...el.attributes]) {
+      if (/^on/i.test(a.name) || a.name === 'style' || (/^(href|src)$/i.test(a.name) && /^\s*javascript:/i.test(a.value))) el.removeAttribute(a.name);
+    }
+    if (el.tagName === 'A') { el.setAttribute('target', '_blank'); el.setAttribute('rel', 'noopener'); }
+  });
+  return doc.body.firstElementChild.innerHTML;
+}
+
+// Produit Wix Stores transmis par la page (vue fusionnée) : options, variantes, prix, stock, champs texte, sections
+function normalizeShop(shop) {
+  if (!shop || typeof shop !== 'object' || !shop.name) return null;
+  const options = (Array.isArray(shop.options) ? shop.options : []).map((o) => ({
+    name: String(o.name || ''),
+    type: o.type === 'color' ? 'color' : 'drop_down',
+    choices: (Array.isArray(o.choices) ? o.choices : []).filter((ch) => ch.visible !== false).map((ch) => ({
+      value: String(ch.value ?? ''), label: String(ch.label || ch.value || ''), inStock: ch.inStock !== false, media: ch.media || '',
+    })),
+  })).filter((o) => o.name && o.choices.length);
+  return {
+    name: String(shop.name),
+    homeUrl: shop.homeUrl || '/',
+    description: cleanHtml(shop.description),
+    sections: (Array.isArray(shop.sections) ? shop.sections : []).filter((x) => x && x.title)
+      .map((x) => ({ title: String(x.title), html: cleanHtml(x.description) })),
+    media: (Array.isArray(shop.media) ? shop.media : []).filter(Boolean),
+    options,
+    variants: (Array.isArray(shop.variants) ? shop.variants : []).filter((v) => v && v.id && v.visible !== false),
+    defaultVariantId: shop.defaultVariantId || null,
+    currency: shop.currency || 'EUR',
+    price: Number(shop.price) || 0,
+    discountedPrice: Number(shop.discountedPrice ?? shop.price) || 0,
+    formattedPrice: shop.formattedPrice || '',
+    formattedDiscountedPrice: shop.formattedDiscountedPrice || shop.formattedPrice || '',
+    inStock: shop.inStock !== false,
+    maxQuantity: Number(shop.maxQuantity) > 0 ? Number(shop.maxQuantity) : 99,
+    customTextFields: (Array.isArray(shop.customTextFields) ? shop.customTextFields : []).filter((f) => f && f.title)
+      .map((f) => ({ title: String(f.title), maxLength: Number(f.maxLength) || 500, mandatory: !!f.mandatory })),
+    paypal: shop.paypal !== false,
+    paypalUrl: shop.paypalUrl || 'https://www.paypal.com/fr/digital-wallet/ways-to-pay/buy-now-pay-later',
+  };
+}
+
 /* ---------- styles ---------- */
 
 const STYLE = `
@@ -660,12 +712,12 @@ canvas { display:block; max-width:100%; }
 .lines { display:flex; flex-direction:column; gap:10px; }
 .line { display:flex; flex-direction:column; gap:4px; scroll-margin-top:200px; }
 .line-head { display:flex; justify-content:space-between; font-size:13px; color:var(--ep-muted); }
-.line-head .full { color:var(--ep-accent); font-weight:600; }
+.line-head .full { color:var(--ep-ink); font-weight:600; }
 .line input { width:100%; font:inherit; font-size:17px; padding:0 14px; min-height:48px; border:1px solid var(--ep-line); border-radius:var(--ep-radius);
   background:var(--ep-surface); color:inherit; }
 textarea::placeholder, input::placeholder { color:#7f7064; }
 .counts { display:flex; flex-wrap:wrap; gap:4px 16px; font-size:13px; color:var(--ep-muted); }
-.counts .full { color:var(--ep-accent); font-weight:600; }
+.counts .full { color:var(--ep-ink); font-weight:600; }
 .font-grid { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; }
 .font-card { position:relative; font:inherit; display:flex; flex-direction:column; gap:4px; padding:8px 8px 10px; border:1px solid var(--ep-line);
   border-radius:var(--ep-radius); background:var(--ep-surface); color:inherit; cursor:pointer; min-width:0; }
@@ -678,7 +730,8 @@ textarea::placeholder, input::placeholder { color:#7f7064; }
 .swatches { display:flex; flex-wrap:wrap; gap:8px; }
 .swatch { width:44px; height:44px; padding:0; border-radius:50%; border:3px solid var(--ep-surface); box-shadow:0 0 0 1px rgba(91,77,67,.25);
   cursor:pointer; flex:none; }
-.swatch[aria-pressed="true"] { box-shadow:0 0 0 2px var(--ep-accent); }
+.swatch[aria-pressed="true"], .swatch[aria-checked="true"] { box-shadow:0 0 0 2px var(--ep-accent); }
+.sr-only { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 .swatch[hidden] { display:none; }
 details.palette { border:1px solid var(--ep-line); border-radius:var(--ep-radius); background:var(--ep-surface); }
 details.palette summary { cursor:pointer; padding:0 14px; min-height:48px; align-items:center; font-size:14px; list-style:none; display:flex; justify-content:space-between; gap:12px; }
@@ -722,6 +775,196 @@ input[type=search] { width:100%; font:inherit; font-size:16px; padding:10px 12px
 .recap dd i { display:inline-block; width:12px; height:12px; border-radius:50%; vertical-align:-1px; margin-right:6px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.15); }
 .recap dd small { color:var(--ep-muted); font-size:12px; margin-left:4px; }
 .recap .caption-m { margin:12px 0 0; padding-top:10px; border-top:1px solid var(--ep-line); font-size:12px; }
+/* ----- vue fusionnée : fiche produit ----- */
+.crumbs { font-size:13px; color:var(--ep-muted); margin:0 0 16px; overflow-wrap:anywhere; }
+.crumbs a { color:inherit; text-decoration:none; } .crumbs a:hover { text-decoration:underline; }
+.crumbs span { margin:0 6px; }
+.thumbs { display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding:2px; scrollbar-width:thin; }
+.thumbs[hidden] { display:none; }
+.thumb-btn { position:relative; flex:none; width:64px; height:64px; padding:0; border:1px solid var(--ep-line); border-radius:var(--ep-radius);
+  background:var(--ep-stage) center/cover no-repeat; cursor:pointer; }
+.thumb-btn[aria-pressed="true"] { border-color:var(--ep-accent); box-shadow:inset 0 0 0 1px var(--ep-accent); }
+.thumb-btn .tag { position:absolute; left:3px; right:3px; bottom:3px; font-size:10px; line-height:1.3; border-radius:3px; background:var(--ep-surface); color:var(--ep-ink); padding:1px 2px; }
+.shop-head { display:flex; flex-direction:column; gap:10px; padding-bottom:20px; }
+.shop-title { margin:0; font-family:var(--ep-display); font-weight:500; font-size:26px; line-height:1.2; color:var(--ep-ink); overflow-wrap:anywhere; text-wrap:balance; }
+.step-title, .opt-value { overflow-wrap:anywhere; }
+@container (min-width: 760px) { .shop-title { font-size:30px; } }
+.price { margin:0; font-size:20px; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+.price s { font-size:15px; color:var(--ep-muted); }
+.price .from { font-size:14px; color:var(--ep-muted); }
+.paypal { margin:0; font-size:13px; color:var(--ep-muted); }
+.paypal a { color:var(--ep-ink); }
+.desc { font-size:14px; color:var(--ep-ink); }
+.desc p { margin:0 0 8px; }
+.desc.clamp { max-height:7.5em; overflow:hidden; -webkit-mask-image:linear-gradient(#000 60%, transparent); mask-image:linear-gradient(#000 60%, transparent); }
+.link-btn { font:inherit; font-size:14px; padding:0; border:0; background:none; color:var(--ep-ink); text-decoration:underline; cursor:pointer; align-self:flex-start; min-height:32px; }
+.link-btn[hidden] { display:none; }
+.opt-select { width:100%; font:inherit; font-size:16px; padding:0 40px 0 14px; min-height:48px; border:1px solid var(--ep-line); border-radius:var(--ep-radius);
+  background:var(--ep-surface); color:inherit; appearance:none; cursor:pointer;
+  background-image:linear-gradient(45deg, transparent 50%, var(--ep-accent) 50%), linear-gradient(135deg, var(--ep-accent) 50%, transparent 50%);
+  background-position:calc(100% - 20px) 50%, calc(100% - 15px) 50%; background-size:5px 5px; background-repeat:no-repeat; }
+/* Choix épuisé : estompé et barré (le barré s'ajoute à la couleur, qui reste visible dessous) */
+.opt-swatch[disabled] { opacity:.5; cursor:not-allowed;
+  background-image:linear-gradient(to top left, transparent calc(50% - 1px), var(--ep-ink) calc(50% - 1px), var(--ep-ink) calc(50% + 1px), transparent calc(50% + 1px)) !important; }
+.opt-error, .field-error { margin:0; font-size:14px; font-weight:600; line-height:1.4; color:var(--ep-danger); display:flex; gap:8px; align-items:baseline; }
+.opt-error[hidden], .field-error[hidden] { display:none; }
+.opt-error::before, .field-error::before { content:"!"; flex:none; width:18px; height:18px; border-radius:50%; background:var(--ep-danger); color:#fff; font-size:12px;
+  line-height:18px; text-align:center; transform:translateY(-1px); }
+.ctf textarea[aria-invalid="true"] { outline:2px solid var(--ep-danger); outline-offset:3px; }
+.opt-select option:disabled { color:#8a7c70; }
+.missing .opt-select, .missing .swatches { outline:2px solid var(--ep-danger); outline-offset:3px; border-radius:var(--ep-radius); }
+.ctf textarea { width:100%; font:inherit; font-size:16px; padding:10px 14px; min-height:80px; border:1px solid var(--ep-line); border-radius:var(--ep-radius);
+  background:var(--ep-surface); color:inherit; resize:vertical; }
+/* Bloc « Personnaliser » : carte repliable (fermée par défaut), séparée des options du produit */
+.perso { border:1px solid var(--ep-line); border-radius:12px; background:var(--ep-accent-soft); margin:8px 0 4px; }
+.perso[open] { background:var(--ep-surface); }
+.perso > summary { list-style:none; cursor:pointer; min-height:68px; padding:12px 16px; display:flex; align-items:center; gap:12px; border-radius:12px; }
+.perso > summary::-webkit-details-marker { display:none; }
+.perso > summary::after { content:""; width:9px; height:9px; border-right:1.5px solid var(--ep-accent); border-bottom:1.5px solid var(--ep-accent); transform:rotate(45deg) translateY(-3px); flex:none; }
+.perso[open] > summary::after { transform:rotate(-135deg) translateY(-3px); }
+.perso-text { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.perso-title { font-family:var(--ep-display); font-size:18px; font-weight:500; color:var(--ep-ink); }
+.perso-title small { font-family:var(--ep-font); font-size:12px; color:var(--ep-muted); font-weight:400; margin-left:8px; letter-spacing:.03em; }
+.perso-sub { font-size:13px; color:var(--ep-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.perso-body { padding:0 16px 6px; display:flex; flex-direction:column; }
+/* Vue fusionnée : plus de numéros (options et personnalisation ne forment plus un seul formulaire), étapes plus compactes */
+.merged .step-head::before { display:none; }
+.merged .step { padding:18px 0; }
+.merged .shop-head { padding-bottom:12px; gap:8px; }
+.merged .paypal { font-size:12px; line-height:1.4; }
+.merged .desc.clamp { max-height:4.6em; }
+.merged .perso .step.first { border-top:0; padding-top:4px; }
+.merged .step-title { font-size:17px; }
+.buy { display:flex; flex-direction:column; gap:12px; padding:20px 0; border-top:1px solid var(--ep-line); }
+.merged .buy { display:grid; grid-template-columns:auto minmax(0,1fr); gap:10px; align-items:stretch; padding:16px 0 20px; border-top:0; }
+.merged .buy > * { grid-column:1 / -1; }
+.merged .buy > .qty { grid-column:1; }
+.merged .buy > .buy-btn[data-action="cart"] { grid-column:2; }
+.merged .buy > .recap { margin:0; padding:12px 14px; }
+.merged .recap h3 { font-size:14px; margin-bottom:8px; }
+.merged .recap dl { font-size:13px; grid-template-columns:96px minmax(0,1fr); gap:4px 12px; }
+.sticky-bar { display:none; }
+@container (max-width: 759px) {
+  .merged .sticky-bar:not([hidden]) { display:flex; position:sticky; bottom:0; z-index:6; align-items:center; gap:14px; margin:0 -4px;
+    padding:10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); background:var(--ep-page, var(--ep-bg)); border-top:1px solid var(--ep-line);
+    box-shadow:0 -6px 12px -8px rgba(91,77,67,.3); }
+  .merged .controls.typing .sticky-bar { display:none; }
+  .sticky-bar .btn { flex:1; width:auto; }
+  .merged .sticky-bar:not([hidden]) { flex-wrap:wrap; }
+  .sticky-bar .bar-error { order:-1; flex:1 0 100%; margin:0; }
+}
+.bar-price { font-family:var(--ep-display); font-size:18px; white-space:nowrap; color:var(--ep-ink); }
+.qty { display:inline-flex; align-items:center; border:1px solid var(--ep-line); border-radius:var(--ep-radius); background:var(--ep-surface); align-self:flex-start; }
+.qty input { width:52px; text-align:center; font:inherit; font-size:16px; border:0; background:none; color:inherit; min-height:44px; -moz-appearance:textfield; }
+.qty input::-webkit-inner-spin-button, .qty input::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
+.btn { font:inherit; font-size:15px; letter-spacing:.03em; min-height:50px; padding:0 20px; border-radius:999px; cursor:pointer; width:100%;
+  border:1px solid var(--ep-ink); background:var(--ep-surface); color:var(--ep-ink); }
+.btn.primary { background:var(--ep-ink); color:var(--ep-surface); }
+.btn[disabled], .btn[aria-disabled="true"] { opacity:.5; cursor:not-allowed; }
+.btn[aria-busy="true"] { cursor:progress; }
+.qty-btn[aria-disabled="true"] { opacity:.35; cursor:not-allowed; }
+.sections details { border-top:1px solid var(--ep-line); }
+.sections details:last-child { border-bottom:1px solid var(--ep-line); }
+.sections summary { cursor:pointer; list-style:none; min-height:48px; display:flex; align-items:center; justify-content:space-between; font-size:15px; }
+.sections summary::-webkit-details-marker { display:none; }
+.sections summary::after { content:"+"; font-size:20px; color:var(--ep-accent); }
+.sections details[open] summary::after { content:"−"; }
+.sections .sec-body { font-size:14px; padding-bottom:14px; }
+/* ===== Vue fusionnée, passe 2 : direction visuelle (crème / brun, titres Fahkwang, bouton principal plein) ===== */
+.merged { --ep-radius:10px; --ep-soft-line:#efe6d8; --ep-field:#9a8c7d; }
+.merged .controls { font-size:16px; line-height:1.55; }
+.merged .preview { border-radius:16px; }
+.merged .shop-head { gap:12px; padding-bottom:22px; }
+.merged .shop-title { font-size:28px; line-height:1.15; letter-spacing:.005em; }
+.merged .price { font-family:var(--ep-display); font-size:24px; line-height:1.2; gap:4px 12px; }
+.merged .price .from { font-family:var(--ep-font); font-size:14px; }
+.merged .price s { font-family:var(--ep-font); font-size:16px; }
+.merged .paypal { font-size:13px; line-height:1.5; }
+.merged .desc { font-size:16px; line-height:1.6; }
+.merged .desc p { margin:0 0 10px; }
+.merged .desc.clamp { max-height:4.8em; }
+.merged .link-btn { font-size:15px; min-height:44px; margin-top:-8px; }
+.merged .step { padding:22px 0; gap:14px; border-top:1px solid var(--ep-soft-line); }
+.merged .step.first { border-top:0; padding-top:0; }
+.merged .step-title { font-size:18px; line-height:1.3; }
+.merged .step-value, .merged .hint, .merged .line-head, .merged .counts, .merged .empty { font-size:14px; }
+.merged .label { font-size:14px; margin:0; }
+.merged .shop-opt:first-of-type, .merged .shop-head + .step { border-top:1px solid var(--ep-soft-line); }
+.merged .opt-select, .merged .line input, .merged .ctf textarea, .merged input[type=search] { border-color:var(--ep-field); border-radius:var(--ep-radius); }
+.merged .opt-select { min-height:52px; }
+.merged .line input { font-size:18px; min-height:52px; }
+.merged .swatch[aria-pressed="true"], .merged .swatch[aria-checked="true"] { box-shadow:0 0 0 2px var(--ep-ink); }
+.merged .card, .merged .font-card, details.palette { border-color:var(--ep-line); }
+.merged details.palette, .merged .file, .merged .drop { border-radius:var(--ep-radius); }
+.merged .perso { margin:12px 0 4px; border-radius:16px; }
+.merged .perso[open] { border-color:#d9cdbb; }
+.merged .perso > summary { min-height:72px; padding:14px 18px; border-radius:16px; }
+.merged .perso-title { display:flex; flex-direction:column; gap:2px; font-size:19px; line-height:1.25; }
+.merged .perso-title small { margin:0; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--ep-muted); }
+.merged .perso-sub { font-size:14px; }
+.merged .perso-body { padding:0 18px 8px; }
+.merged .buy { gap:12px; padding:22px 0 26px; border-top:1px solid var(--ep-soft-line); }
+.merged .buy > .qty { align-self:stretch; justify-content:space-between; border-color:var(--ep-field); border-radius:999px; }
+.merged .qty input { width:44px; }
+.merged .buy > .recap { margin:0 0 6px; padding:2px 0 2px 16px; background:none; border:0; border-left:2px solid var(--ep-accent); border-radius:0; }
+.merged .recap h3 { font-size:16px; margin:0 0 10px; }
+.merged .recap dl { font-size:14px; grid-template-columns:104px minmax(0,1fr); gap:6px 12px; }
+.merged .recap dd { text-align:left; }
+.merged .recap .caption-m { margin:12px 0 0; padding-top:0; border-top:0; font-size:13px; }
+.merged .btn { min-height:54px; font-size:16px; letter-spacing:.02em; white-space:nowrap; padding:0 22px; border-width:1.5px; background:transparent; }
+.merged .btn.primary { background:var(--ep-ink); color:#fff; }
+@media (hover:hover) {
+  .merged .btn:not(.primary):not([disabled]):not([aria-disabled="true"]):hover { background:var(--ep-accent-soft); }
+  .merged .btn.primary:not([disabled]):not([aria-disabled="true"]):hover { background:#463a32; }
+}
+.merged .sections { margin-top:4px; }
+.merged .sections details { border-top:1px solid var(--ep-soft-line); }
+.merged .sections details:last-child { border-bottom:1px solid var(--ep-soft-line); }
+.merged .sections summary { min-height:58px; gap:12px; font-family:var(--ep-display); font-size:16px; }
+.merged .sections summary::after, .merged .sections details[open] summary::after { content:""; width:8px; height:8px; flex:none;
+  border-right:1.5px solid var(--ep-ink); border-bottom:1.5px solid var(--ep-ink); transform:rotate(45deg) translateY(-2px); }
+.merged .sections details[open] summary::after { transform:rotate(-135deg) translateY(-2px); }
+.merged .sections .sec-body { font-size:15px; line-height:1.65; padding:0 0 20px; }
+.merged .thumbs { gap:10px; margin-top:12px; padding:3px; }
+.merged .thumb-btn { width:72px; height:72px; border-radius:10px; overflow:hidden; }
+.merged .thumb-btn[aria-pressed="true"] { border-color:var(--ep-ink); box-shadow:0 0 0 1px var(--ep-ink); }
+.merged .thumb-btn .tag { left:50%; right:auto; bottom:4px; transform:translateX(-50%); width:max-content; font-size:10.5px; line-height:1.45;
+  padding:0 7px; border-radius:999px; background:rgba(255,248,241,.9); }
+@container (min-width: 760px) {
+  .merged.wrap { grid-template-columns:minmax(0,1.2fr) minmax(360px,1fr); gap:56px; }
+  .merged .shop-title { font-size:36px; }
+  .merged .price { font-size:26px; }
+  .merged .step-title { font-size:19px; }
+  .merged .btn.primary { box-shadow:0 6px 14px -8px rgba(91,77,67,.6); }
+}
+@container (max-width: 759px) {
+  /* Seul l'aperçu reste collé en haut ; les vignettes défilent avec la page */
+  .merged.wrap { gap:0; }
+  .merged .stage-col { display:contents; }
+  .merged .stage-col[hidden] { display:none; }
+  .merged .preview { position:sticky; top:var(--ep-sticky-top, 0px); z-index:5; margin-top:8px;
+    box-shadow:0 0 0 8px var(--ep-page, var(--ep-bg)), 0 12px 16px -10px rgba(91,77,67,.4); }
+  .merged .preview .live { position:absolute; left:8px; bottom:8px; z-index:1; max-width:calc(100% - 72px); padding:6px 12px; border:0; border-radius:999px;
+    box-shadow:0 1px 3px rgba(91,77,67,.18); background:rgba(255,255,255,.93); font-size:12.5px; line-height:1.3; }
+  .merged .thumbs { margin-top:16px; }
+  .merged .controls { margin-top:16px; }
+  .merged .line { scroll-margin-top:290px; }
+  .merged .tech-grid { grid-template-columns:1fr; }
+  .merged .card { min-height:64px; }
+  /* Carte repliée : une carte ; dépliée : pleine largeur, sans cadre latéral, pour ne pas rétrécir le contenu */
+  .merged .perso:not([open]) > summary { padding:14px 16px; }
+  .merged .perso[open] { border-width:1px 0; border-radius:0; background:transparent; }
+  .merged .perso[open] > summary { padding:14px 0; border-radius:0; }
+  .merged .perso-body { padding:0 0 8px; }
+  .merged .buy { grid-template-columns:auto minmax(0,1fr); }
+  .merged .buy > .buy-btn[data-action="cart"] { padding:0 12px; letter-spacing:.01em; }
+  .merged .bar-price { font-size:17px; }
+  .merged .sticky-bar:not([hidden]) { gap:12px; padding-inline:16px; }
+  .merged .sticky-bar .btn { flex:1 1 auto; min-width:0; min-height:48px; padding:0 14px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .merged .btn { transition:background-color .15s, color .15s, box-shadow .15s; }
+}
 button:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus-visible, .drop:focus-within {
   outline:2px solid var(--ep-ink); outline-offset:3px; }
 .step[data-hide] { display:none; }
@@ -734,7 +977,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus
 
 class EmbroideryPreview extends HTMLElement {
   static get observedAttributes() {
-    return ['config', 'state', 'debug', 'controls', 'request-snapshot'];
+    return ['config', 'state', 'debug', 'controls', 'request-snapshot', 'shop-status'];
   }
 
   constructor() {
@@ -748,6 +991,12 @@ class EmbroideryPreview extends HTMLElement {
     this._raf = 0;
     this._emitTimer = 0;
     this._built = false;
+    // Vue fusionnée : choix d'options, quantité, champs texte du produit, photo affichée hors aperçu
+    this._sel = {};
+    this._qty = 1;
+    this._ctf = {};
+    this._photo = null;
+    this._shopStatus = { busy: false, error: '' };
   }
 
   connectedCallback() {
@@ -796,6 +1045,11 @@ class EmbroideryPreview extends HTMLElement {
     } else if (name === 'request-snapshot') {
       this._snapshot();
       return;
+    } else if (name === 'shop-status') {
+      // La page indique l'ajout au panier en cours ou son échec
+      try { this._shopStatus = { busy: false, error: '', ...JSON.parse(value || '{}') }; } catch { this._shopStatus = { busy: false, error: '' }; }
+      this._syncShop();
+      return;
     }
     this._schedule();
   }
@@ -805,6 +1059,7 @@ class EmbroideryPreview extends HTMLElement {
   _normalizeConfig(c) {
     return {
       image: c.image || '',
+      shop: normalizeShop(c.shop),
       positions: Array.isArray(c.positions) && c.positions.length ? c.positions : DEFAULT_POSITIONS,
       colors: Array.isArray(c.colors) && c.colors.length ? c.colors : DEFAULT_COLORS,
       fonts: Array.isArray(c.fonts) && c.fonts.length ? c.fonts : DEFAULT_FONTS,
@@ -886,6 +1141,7 @@ class EmbroideryPreview extends HTMLElement {
   _buildShell() {
     this._root.innerHTML = `
       <style>${STYLE}</style>
+      <nav class="crumbs" aria-label="Fil d'Ariane" hidden></nav>
       <div class="wrap">
         <div class="stage-col">
           <div class="preview" part="preview">
@@ -893,6 +1149,7 @@ class EmbroideryPreview extends HTMLElement {
             <div class="status" aria-live="polite"></div>
             <button type="button" class="zoom" aria-pressed="false" aria-label="Voir de près">${ICONS.zoom}<span>Voir de près</span></button>
           </div>
+          <div class="thumbs" role="group" aria-label="Photos du produit" hidden></div>
           <p class="live" aria-hidden="true"></p>
           <p class="caption"></p>
         </div>
@@ -904,6 +1161,24 @@ class EmbroideryPreview extends HTMLElement {
     this._controls = this._root.querySelector('.controls');
     this._controls.hidden = this.getAttribute('controls') === 'false';
     this._zoomBtn = this._root.querySelector('.zoom');
+    this._thumbs = this._root.querySelector('.thumbs');
+    this._thumbs.addEventListener('click', (e) => {
+      const b = e.target.closest('.thumb-btn');
+      if (!b) return;
+      // Vue d'une zone : retour à l'aperçu de la personnalisation ; autre photo : affichée telle quelle
+      const img = (p) => p.image || this._config.image;
+      const pos = this._config.positions.find((p) => img(p) === b.dataset.url);
+      if (pos) {
+        this._photo = null;
+        if (img(this._position()) !== b.dataset.url) this._state = { ...this._state, positionId: (this._positions().find((p) => img(p) === b.dataset.url) || pos).id };
+        this._syncControls();
+        this._emitChange();
+      } else {
+        this._photo = b.dataset.url;
+      }
+      this._syncShop();
+      this._schedule();
+    });
     this._zoomBtn.addEventListener('click', () => {
       this._zoom = !this._zoom;
       this._zoomBtn.setAttribute('aria-pressed', String(this._zoom));
@@ -914,11 +1189,15 @@ class EmbroideryPreview extends HTMLElement {
 
     this._controls.addEventListener('change', (e) => {
       if (e.target.classList.contains('logo-file') && e.target.files[0]) this._setLogo(e.target.files[0]);
+      if (e.target.matches('select[data-opt]')) this._choose(e.target.dataset.opt, e.target.value);
+      if (e.target.matches('.qty input')) e.target.value = this._qty;
     });
     this._controls.addEventListener('click', (e) => {
       if (e.target.closest('.logo-remove')) return this._clearLogo();
+      if (this._onShopClick(e)) return;
       const btn = e.target.closest('button[data-group]');
       if (!btn) return;
+      this._photo = null;
       this._state = { ...this._state, [btn.dataset.group]: btn.dataset.id };
       this._state.positionId = this._position().id;
       this._syncControls();
@@ -927,7 +1206,10 @@ class EmbroideryPreview extends HTMLElement {
     });
     this._controls.addEventListener('input', (e) => {
       if (e.target.type === 'search') return this._filterThreads(e.target.value);
+      if (e.target.matches('[data-ctf]')) { this._ctf[e.target.dataset.ctf] = e.target.value; this._revalidate(); return this._syncShop(); }
+      if (e.target.matches('.qty input')) { this._qty = clamp(Math.round(Number(e.target.value)) || 1, 1, this._config.shop?.maxQuantity || 99); return this._syncShop(); }
       if (!e.target.matches('input[data-line]')) return;
+      this._photo = null;
       // Une ligne par champ ; les lignes vides de fin sont ignorées
       const cleaned = this._cleanText(this._lineInputs.map((i) => i.value.replace(/\n/g, ' ')).join('\n').replace(/\n+$/, ''));
       this._state = { ...this._state, text: cleaned };
@@ -941,11 +1223,21 @@ class EmbroideryPreview extends HTMLElement {
       this._controls.addEventListener(type, (e) => {
         if (!e.target.matches('input[data-line]')) return;
         this._typing = type === 'focusin';
+        this._controls.classList.toggle('typing', this._typing);
         this._schedule();
       });
     }
+    // Ouverture du bloc « Personnaliser » : les miniatures de police ne se dessinent qu'une fois visibles
+    this._controls.addEventListener('toggle', (e) => {
+      if (!e.target.matches('details.perso')) return;
+      e.target.querySelector(':scope > summary')?.setAttribute('aria-expanded', String(e.target.open));
+      this._persoSeen = true;
+      this._drawFontThumbs();
+      this._schedule();
+    }, true);
     // Entrée : ligne suivante (ou fin de saisie sur la dernière)
     this._controls.addEventListener('keydown', (e) => {
+      if (e.target.matches('.opt-swatch')) return this._onSwatchKey(e);
       if (e.key !== 'Enter' || !e.target.matches('input[data-line]')) return;
       e.preventDefault();
       const next = this._lineInputs[Number(e.target.dataset.line) + 1];
@@ -985,8 +1277,10 @@ class EmbroideryPreview extends HTMLElement {
     const swatch = (col) =>
       `<button type="button" class="swatch" ${attrs('colorId', col)} data-search="${escapeHtml(normalize(`${col.label} ${colorFamily(col.hex)}`))}" style="background:${escapeHtml(col.hex)}" aria-label="Fil ${escapeHtml(colorFamily(col.hex).split(' ')[0])}"></button>`;
     const popular = c.colors.filter((col) => c.popularColors.includes(col.id));
+    // Vue fusionnée : pas de zone live sur le récap (il serait relu à chaque lettre saisie)
+    const recap = `<div class="recap" ${c.shop ? '' : 'aria-live="polite"'}><h3>Votre personnalisation</h3><dl></dl><p class="caption-m">${escapeHtml(c.caption)}</p></div>`;
 
-    this._controls.innerHTML = `
+    this._controls.innerHTML = `${this._shopTopHtml()}
       <section class="step" ${c.techniques.length > 1 ? '' : 'hidden'}>
         ${head('Technique', 'technique')}
         <div class="tech-grid">
@@ -1039,7 +1333,9 @@ class EmbroideryPreview extends HTMLElement {
         ${head('Taille', 'size')}
         <div class="seg" role="group" aria-label="Taille">${SIZES.map((s) => `<button type="button" ${attrs('sizeId', s)}>${s.label}</button>`).join('')}</div>
       </section>
-      <div class="recap" aria-live="polite"><h3>Votre personnalisation</h3><dl></dl><p class="caption-m">${escapeHtml(c.caption)}</p></div>`;
+      ${c.shop ? '</div></details>' : recap}
+      ${this._shopBottomHtml(recap)}`;
+    this._buildShopChrome();
     this._lineInputs = [...this._controls.querySelectorAll('input[data-line]')];
     this._thumbKeys = new Map();
     this._syncControls();
@@ -1147,18 +1443,357 @@ class EmbroideryPreview extends HTMLElement {
     error.hidden = !this._logoError;
 
     // Récapitulatif
-    const rows = [['Technique', technique.label], ['Emplacement', where]];
+    const rows = c.shop && c.techniques.length < 2 ? [['Emplacement', where]] : [['Technique', technique.label], ['Emplacement', where]];
     if (dtf) rows.push(['Logo', this._logo ? this._logo.name : 'À ajouter']);
     else rows.push(['Texte', this._lines().join(' / ') || 'À saisir'], ['Police', font.label],
       ['Couleur du fil', { html: `<i style="background:${escapeHtml(color.hex)}"></i>` }]);
     rows.push(['Taille', size.label]);
     q('.recap dl').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v.html ?? escapeHtml(v)}</dd>`).join('');
+    // Vue fusionnée : le récapitulatif n'a de sens que si l'article est personnalisé
+    q('.recap').hidden = !!c.shop && !this._personalised();
     // Résumé d'une ligne sous l'aperçu (mobile)
     this._live.textContent = (dtf
       ? [this._logo?.name || 'Ajoutez votre logo', where]
       : [this._lines().join(' / ') || 'Saisissez votre texte', font.label, where]).join(' · ');
 
     this._drawFontThumbs();
+    this._syncShop();
+  }
+
+  /* ----- vue fusionnée : fiche produit ----- */
+
+  _shopTopHtml() {
+    const shop = this._config.shop;
+    if (!shop) return '';
+    const opt = (o, i) => {
+      const id = `opt-${i}`;
+      const err = `${id}-err`;
+      const body = o.type === 'color'
+        ? `<div class="swatches" role="radiogroup" aria-labelledby="${id}" aria-describedby="${err}" aria-required="true">${o.choices.map((ch) =>
+          `<button type="button" class="swatch opt-swatch" role="radio" aria-checked="false" tabindex="-1" data-opt="${escapeHtml(o.name)}" data-val="${escapeHtml(ch.value)}" style="background:${escapeHtml(ch.value)}" aria-label="${escapeHtml(ch.label)}${ch.inStock ? '' : ', épuisé'}" title="${escapeHtml(ch.label)}${ch.inStock ? '' : ' (épuisé)'}" ${ch.inStock ? '' : 'disabled'}></button>`).join('')}</div>`
+        : `<select class="opt-select" data-opt="${escapeHtml(o.name)}" aria-labelledby="${id}" aria-describedby="${err}" aria-required="true"><option value="">Choisir une option</option>${o.choices.map((ch) =>
+          `<option value="${escapeHtml(ch.value)}" ${ch.inStock ? '' : 'disabled'}>${escapeHtml(ch.label)}${ch.inStock ? '' : ' (épuisé)'}</option>`).join('')}</select>`;
+      return `<section class="step shop-opt" data-optname="${escapeHtml(o.name)}"><div class="step-head"><h3 class="step-title" id="${id}">${escapeHtml(o.name)}</h3><span class="step-value opt-value"></span></div>${body}<p class="opt-error" id="${err}" hidden></p></section>`;
+    };
+    return `
+      <header class="shop-head">
+        <h1 class="shop-title">${escapeHtml(shop.name)}</h1>
+        <p class="price" aria-live="polite" aria-atomic="true"></p>
+        <p class="paypal" hidden></p>
+        ${shop.description ? `<div class="desc clamp">${shop.description}</div><button type="button" class="link-btn more" aria-expanded="false">Lire plus</button>` : ''}
+      </header>
+      ${shop.options.map(opt).join('')}
+      ${shop.customTextFields.map((f, i) => `<section class="step ctf"><div class="step-head"><h3 class="step-title"><label for="ctf-${i}">${escapeHtml(f.title)}${f.mandatory ? '<span aria-hidden="true"> *</span>' : ''}</label></h3></div>
+        <textarea id="ctf-${i}" data-ctf="${escapeHtml(f.title)}" maxlength="${f.maxLength}" aria-describedby="ctf-${i}-err" ${f.mandatory ? 'required aria-required="true"' : ''}></textarea>
+        <p class="field-error" id="ctf-${i}-err" hidden></p></section>`).join('')}
+      <details class="perso"><summary aria-expanded="false"><span class="perso-text"><span class="perso-title"><small>Facultatif</small>Personnaliser cet article</span><span class="perso-sub"></span></span></summary><div class="perso-body">`;
+  }
+
+  _shopBottomHtml(recap = '') {
+    const shop = this._config.shop;
+    if (!shop) return '';
+    return `
+      <div class="buy">
+        ${recap}
+        <div class="qty" role="group" aria-label="Choisir la quantité">
+          <button type="button" class="icon-btn qty-btn" data-step="-1" aria-label="Diminuer la quantité">${ICONS.minus}</button>
+          <input type="number" inputmode="numeric" min="1" max="${shop.maxQuantity}" value="1" aria-label="Quantité">
+          <button type="button" class="icon-btn qty-btn" data-step="1" aria-label="Augmenter la quantité">${ICONS.plus}</button>
+        </div>
+        <button type="button" class="btn primary buy-btn" data-action="cart"></button>
+        <button type="button" class="btn buy-btn" data-action="buy">Commander et payer</button>
+        <p class="note error shop-error" role="alert" hidden></p>
+        <p class="sr-only sr-status" role="status" aria-live="polite"></p>
+      </div>
+      ${shop.sections.length ? `<div class="sections">${shop.sections.map((x) => `<details><summary>${escapeHtml(x.title)}</summary><div class="sec-body">${x.html}</div></details>`).join('')}</div>` : ''}
+      <div class="sticky-bar" role="group" aria-label="Achat rapide" hidden inert aria-hidden="true"><p class="note error shop-error bar-error" role="alert" hidden></p><span class="bar-price"></span><button type="button" class="btn primary buy-btn" data-action="cart"></button></div>`;
+  }
+
+  _buildShopChrome() {
+    const shop = this._config.shop;
+    const crumbs = this._root.querySelector('.crumbs');
+    crumbs.hidden = !shop;
+    this._root.querySelector('.wrap').classList.toggle('merged', !!shop);
+    this._io?.disconnect();
+    // Mobile fusionné : le résumé d'une ligne se superpose à l'aperçu (sticky) ; sinon il reste sous l'aperçu
+    const liveHost = shop ? this._preview : this._root.querySelector('.stage-col');
+    if (this._live && this._live.parentNode !== liveHost) liveHost.insertBefore(this._live, shop ? this._status : this._root.querySelector('.caption'));
+    if (!shop) { this._thumbs.hidden = true; return; }
+    // Barre d'achat mobile : visible tant que le bloc d'achat n'est pas à l'écran
+    const bar = this._controls.querySelector('.sticky-bar'), buy = this._controls.querySelector('.buy');
+    if (bar && buy && 'IntersectionObserver' in window) {
+      // Masquée aussi pour les technologies d'assistance (inert) tant que le vrai bloc d'achat est à l'écran
+      this._io = new IntersectionObserver((entries) => {
+        const hide = entries[entries.length - 1].isIntersecting;
+        bar.hidden = hide;
+        bar.toggleAttribute('inert', hide);
+        bar.setAttribute('aria-hidden', String(hide));
+        this._syncError();
+      });
+      this._io.observe(buy);
+    }
+    crumbs.innerHTML = `<a href="${escapeHtml(shop.homeUrl)}">Accueil</a><span aria-hidden="true">/</span>${escapeHtml(shop.name)}`;
+    // Vignettes : d'abord les vues avec zones (aperçu de la personnalisation), puis les autres photos du produit
+    const views = [...new Set(this._config.positions.map((p) => p.image || this._config.image).filter(Boolean))];
+    // Vignette légère pour les photos Wix ; les autres adresses sont utilisées telles quelles
+    const small = (u) => (/^https:\/\/static\.wixstatic\.com\/media\/[^/]+$/.test(u) ? `${u}/v1/fill/w_128,h_128,q_80/t.jpg` : u);
+    const items = [...views.map((url) => ({ url, tag: 'Aperçu' })), ...shop.media.filter((u) => !views.includes(u)).map((url) => ({ url }))];
+    this._thumbs.hidden = items.length < 2;
+    this._thumbs.innerHTML = items.map((it, i) => `<button type="button" class="thumb-btn" data-url="${escapeHtml(it.url)}" style="background-image:url('${escapeHtml(small(it.url))}')"
+      aria-label="${it.tag ? 'Aperçu de votre personnalisation' : `Photo ${i + 1}`}">${it.tag ? `<span class="tag">${it.tag}</span>` : ''}</button>`).join('');
+  }
+
+  // Variante correspondant aux options choisies (toutes les options doivent être choisies)
+  _variant() {
+    const shop = this._config.shop;
+    if (!shop.options.length) return shop.variants[0] || (shop.defaultVariantId ? { id: shop.defaultVariantId } : null);
+    if (shop.options.some((o) => !this._sel[o.name])) return null;
+    const label = (o) => o.choices.find((ch) => ch.value === this._sel[o.name])?.label;
+    return shop.variants.find((v) => shop.options.every((o) => {
+      const val = v.choices?.[o.name];
+      return val === this._sel[o.name] || val === label(o);
+    })) || null;
+  }
+
+  _choose(name, value) {
+    const shop = this._config.shop;
+    const o = shop.options.find((x) => x.name === name);
+    if (!o) return;
+    this._sel = { ...this._sel, [name]: value || undefined };
+    this._revalidate();
+    // Photo liée au choix (couleur…) : montrée comme le ferait la fiche Wix
+    const media = o.choices.find((ch) => ch.value === value)?.media;
+    if (media && !this._config.positions.some((p) => (p.image || this._config.image) === media)) this._photo = media;
+    this._syncShop();
+    this._schedule();
+  }
+
+  _onShopClick(e) {
+    const shop = this._config.shop;
+    if (!shop) return false;
+    const sw = e.target.closest('.opt-swatch');
+    if (sw) { this._choose(sw.dataset.opt, sw.dataset.val); return true; }
+    const q = e.target.closest('.qty-btn');
+    if (q) { this._qty = clamp(this._qty + Number(q.dataset.step), 1, shop.maxQuantity); this._syncShop(); return true; }
+    if (e.target.closest('.more')) {
+      const d = this._controls.querySelector('.desc');
+      const open = d.classList.toggle('clamp');
+      e.target.closest('.more').textContent = open ? 'Lire plus' : 'Lire moins';
+      e.target.closest('.more').setAttribute('aria-expanded', String(!open));
+      return true;
+    }
+    const buy = e.target.closest('.buy-btn');
+    if (buy) {
+      // Le message d'erreur s'affiche près du bouton pressé (bloc d'achat ou barre mobile)
+      this._pressed = buy.closest('.sticky-bar') ? 'bar' : 'buy';
+      this._buy(buy.dataset.action);
+      return true;
+    }
+    return false;
+  }
+
+  _onSwatchKey(e) {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    const group = [...e.target.closest('.swatches').querySelectorAll('.opt-swatch:not([disabled])')];
+    const i = group.indexOf(e.target);
+    let n;
+    if (step) n = (i + step + group.length) % group.length;
+    else if (e.key === 'Home') n = 0;
+    else if (e.key === 'End') n = group.length - 1;
+    else return;
+    e.preventDefault();
+    group[n].focus();
+    this._choose(group[n].dataset.opt, group[n].dataset.val);
+  }
+
+  // Ce qui empêche l'achat : options ou champs obligatoires manquants, combinaison indisponible, produit épuisé
+  _validate() {
+    const shop = this._config.shop;
+    const missing = shop.options.filter((o) => !this._sel[o.name]).map((o) => o.name);
+    const emptyFields = shop.customTextFields.filter((f) => f.mandatory && !(this._ctf[f.title] || '').trim()).map((f) => f.title);
+    const variant = this._variant();
+    const list = (a) => (a.length > 1 ? `${a.slice(0, -1).join(', ')} et ${a[a.length - 1]}` : a[0]);
+    let error = '';
+    if (!shop.inStock) error = 'Cet article est épuisé pour le moment.';
+    else if (missing.length) error = `Choisissez ${list(missing.map((n) => `votre ${n.toLowerCase()}`))}.`;
+    else if (emptyFields.length) error = `Il reste à compléter : ${emptyFields.join(', ')}.`;
+    else if (!variant) error = shop.options.length ? "Cette combinaison n'est pas disponible. Essayez un autre choix." : "Cet article n'est pas disponible pour le moment.";
+    else if (variant.inStock === false) error = "Cette combinaison est épuisée. Essayez un autre choix.";
+    return { error, missing, emptyFields, variant };
+  }
+
+  // Après un premier refus, le message suit les choix du client et disparaît dès que tout est bon
+  _revalidate() {
+    if (!this._invalid) return;
+    const v = this._validate();
+    this._invalid = !!v.error;
+    if (!v.missing.length && !v.emptyFields.length) this._missing = false;
+    this._shopStatus = { busy: false, error: v.error };
+  }
+
+  _personalised() {
+    return this._state.technique === 'dtf' ? !!this._logo : this._lines().length > 0;
+  }
+
+  _buy(action) {
+    const shop = this._config.shop;
+    if (this._shopStatus.busy) return;
+    const { error, missing, emptyFields, variant } = this._validate();
+    this._invalid = !!error;
+    this._missing = !!(missing.length || emptyFields.length);
+    if (error) {
+      this._shopStatus = { busy: false, error };
+      this._syncShop();
+      // Le focus va au premier élément à corriger, puis la page défile jusqu'à lui
+      const target = this._controls.querySelector('.shop-opt.missing select, .shop-opt.missing .opt-swatch[tabindex="0"], .ctf textarea[aria-invalid="true"]');
+      // Saut direct : un défilement doux est interrompu par le focus et par la barre d'achat qui se masque
+      const smooth = 'auto';
+      if (target) {
+        target.scrollIntoView({ block: 'center', behavior: smooth });
+        target.focus({ preventScroll: true });
+      } else if (this._pressed !== 'bar') {
+        this._controls.querySelector('.shop-error:not(.bar-error)')?.scrollIntoView({ block: 'center', behavior: smooth });
+      }
+      return;
+    }
+    this._action = action;
+    this._shopStatus = { busy: true, error: '' };
+    this._syncShop();
+    const customText = Object.fromEntries(Object.entries(this._ctf).filter(([, v]) => (v || '').trim()));
+    this.dispatchEvent(new CustomEvent('shop-action', {
+      detail: { action, variantId: variant.id, quantity: this._qty, customText, personalised: this._personalised(), embroidery: this._detail() },
+      bubbles: true, composed: true,
+    }));
+  }
+
+  _fmt(n) {
+    try { return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: this._config.shop.currency }).format(n); } catch { return `${n.toFixed(2)} €`; }
+  }
+
+  _syncShop() {
+    const shop = this._config.shop;
+    if (!shop || !this._controls) return;
+    const q = (sel) => this._controls.querySelector(sel);
+    const variant = this._variant();
+    // Prix : celui de la variante choisie ; sinon le prix du produit, ou « À partir de » si les variantes diffèrent
+    const v = variant?.price != null ? variant : null;
+    const prices = shop.variants.map((x) => Number(x.discountedPrice ?? x.price)).filter((n) => n > 0);
+    const min = prices.length ? Math.min(...prices) : shop.discountedPrice;
+    const varies = !v && prices.length && Math.max(...prices) !== min;
+    const now = v ? Number(v.discountedPrice ?? v.price) : varies ? min : shop.discountedPrice;
+    const was = v ? Number(v.price) : varies ? 0 : shop.price;
+    const fNow = v ? (v.formattedDiscountedPrice || v.formattedPrice) : varies ? this._fmt(min) : shop.formattedDiscountedPrice;
+    // Réécrit seulement si le contenu change : la zone live n'annonce pas le même prix à chaque frappe
+    const priceHtml = `${varies ? '<span class="from">Dès</span> ' : ''}<span class="now">${escapeHtml(fNow || this._fmt(now))}</span>${was > now ? ` <s>${escapeHtml(v?.formattedPrice || shop.formattedPrice || this._fmt(was))}</s>` : ''}`;
+    if (this._priceHtml !== priceHtml) { this._priceHtml = priceHtml; q('.price').innerHTML = priceHtml; }
+    // Paiement en 4 fois PayPal (entre 30 € et 2 000 €), comme sur la fiche Wix
+    const pp = q('.paypal');
+    const ppOk = shop.paypal && now >= 30 && now <= 2000;
+    pp.hidden = !ppOk;
+    if (ppOk) {
+      const ppHtml = `Payez en 4 fois sans frais : 4 × ${escapeHtml(this._fmt(Math.round((now / 4) * 100) / 100))}. Attention ! Un crédit coûte de l'argent et doit être remboursé. <a href="${escapeHtml(shop.paypalUrl)}" target="_blank" rel="noopener" aria-label="En savoir plus sur le paiement en 4 fois (nouvel onglet)">En savoir plus</a>`;
+      if (this._ppHtml !== ppHtml) { this._ppHtml = ppHtml; pp.innerHTML = ppHtml; }
+    }
+    const more = q('.more');
+    if (more) more.hidden = q('.desc').scrollHeight <= q('.desc').clientHeight + 2 && q('.desc').classList.contains('clamp');
+
+    // Options
+    this._controls.querySelectorAll('.shop-opt').forEach((sec) => {
+      const name = sec.dataset.optname;
+      const o = shop.options.find((x) => x.name === name);
+      const val = this._sel[name];
+      sec.querySelector('.opt-value').textContent = o.choices.find((ch) => ch.value === val)?.label || '';
+      // Choix manquant après un refus : contour rouge + message juste sous l'option
+      const flagged = !!this._missing && !val;
+      sec.classList.toggle('missing', flagged);
+      const control = sec.querySelector('select, .swatches');
+      control.setAttribute('aria-invalid', String(flagged));
+      const optErr = sec.querySelector('.opt-error');
+      optErr.textContent = flagged ? `Choisissez votre ${name.toLowerCase()}` : '';
+      optErr.hidden = !flagged;
+      const sel = sec.querySelector('select');
+      if (sel && sel.value !== (val || '')) sel.value = val || '';
+      // Groupe radio : une seule tabulation (choix actuel, sinon premier choix disponible), flèches pour le reste
+      const radios = [...sec.querySelectorAll('.opt-swatch')];
+      const stop = radios.find((b) => !b.disabled && b.dataset.val === val) || radios.find((b) => !b.disabled);
+      radios.forEach((b) => {
+        b.setAttribute('aria-checked', String(b.dataset.val === val));
+        b.tabIndex = b === stop ? 0 : -1;
+      });
+    });
+    // Champs texte obligatoires restés vides
+    this._controls.querySelectorAll('.ctf').forEach((sec) => {
+      const ta = sec.querySelector('textarea');
+      const flagged = !!this._missing && ta.required && !ta.value.trim();
+      ta.setAttribute('aria-invalid', String(flagged));
+      const fe = sec.querySelector('.field-error');
+      fe.textContent = flagged ? 'Ce champ est à remplir' : '';
+      fe.hidden = !flagged;
+    });
+
+    // Achat
+    const qty = q('.qty input');
+    if (qty && this._root.activeElement !== qty) qty.value = this._qty;
+    const busy = this._shopStatus.busy;
+    const action = this._action || 'cart';
+    const label = (a) => (!shop.inStock ? 'Épuisé'
+      : a === 'buy' ? (busy && action === 'buy' ? 'Commande en cours…' : 'Commander et payer')
+        : busy && action !== 'buy' ? 'Ajout en cours…' : 'Ajouter au panier');
+    // Occupé : aria-disabled (le focus reste sur le bouton) ; épuisé : vraiment désactivé
+    this._controls.querySelectorAll('.buy-btn').forEach((b) => {
+      const text = label(b.dataset.action);
+      if (b.textContent !== text) b.textContent = text;
+      b.disabled = !shop.inStock;
+      b.setAttribute('aria-disabled', String(busy || !shop.inStock));
+      b.setAttribute('aria-busy', String(busy));
+    });
+    if (qty) qty.disabled = !shop.inStock;
+    this._controls.querySelectorAll('.qty-btn').forEach((b) => {
+      const off = !shop.inStock || (Number(b.dataset.step) < 0 ? this._qty <= 1 : this._qty >= shop.maxQuantity);
+      b.setAttribute('aria-disabled', String(off));
+    });
+    // Annonce vocale (zone polie) : ajout en cours, puis confirmation
+    const sr = q('.sr-status');
+    if (sr) {
+      let msg = sr.textContent;
+      if (busy) msg = action === 'buy' ? 'Commande en cours…' : 'Ajout au panier en cours…';
+      else if (this._wasBusy) msg = !this._shopStatus.error && action !== 'buy' ? 'Article ajouté au panier.' : '';
+      if (sr.textContent !== msg) sr.textContent = msg;
+    }
+    this._wasBusy = busy;
+    const barPrice = q('.bar-price');
+    if (barPrice) barPrice.textContent = `${varies ? 'Dès ' : ''}${fNow || this._fmt(now)}`;
+
+    // Bloc « Personnaliser » : résumé quand il est replié, ouvert d'office si l'article est déjà personnalisé
+    const perso = q('details.perso');
+    if (perso) {
+      const dtf = this._state.technique === 'dtf';
+      const sub = !this._personalised() ? 'Un prénom, un texte ou un logo, fait main'
+        : dtf ? `Logo : ${this._logo.name} · ${this._position().label}` : `« ${this._lines().join(' / ')} » · police ${this._font().label}`;
+      const subEl = perso.querySelector('.perso-sub');
+      if (subEl.textContent !== sub) { subEl.textContent = sub; subEl.title = this._personalised() ? sub : ''; }
+      if (!this._persoSeen && this._personalised()) { this._persoSeen = true; perso.open = true; }
+    }
+    this._syncError();
+
+    // Vignettes
+    const shown = this._photo || this._position().image || this._config.image;
+    this._thumbs.querySelectorAll('.thumb-btn').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.url === shown)));
+  }
+
+  // Message d'achat (erreur de validation ou échec du panier), affiché près du bouton pressé : bloc d'achat ou barre mobile
+  _syncError() {
+    if (!this._controls) return;
+    const msg = this._shopStatus.error || '';
+    const bar = this._controls.querySelector('.sticky-bar');
+    const onBar = this._pressed === 'bar' && !!bar && !bar.hidden;
+    const put = (el, text) => {
+      if (!el) return;
+      if (el.textContent !== text) el.textContent = text;
+      el.hidden = !text;
+    };
+    put(this._controls.querySelector('.shop-error:not(.bar-error)'), onBar ? '' : msg);
+    put(this._controls.querySelector('.bar-error'), onBar ? msg : '');
   }
 
   // Miniature de chaque police : le texte du client (ou « Prénom »), dessiné avec les vrais points de la police
@@ -1286,7 +1921,9 @@ class EmbroideryPreview extends HTMLElement {
   _draw() {
     if (!this._canvas) return;
     const pos = this._position();
-    const entry = this._getImage(pos.image || this._config.image);
+    const photoOnly = !!(this._photo && this._config.shop);
+    const entry = this._getImage(photoOnly ? this._photo : pos.image || this._config.image);
+    this._zoomBtn.hidden = photoOnly;
     // Pas de photo configurée : rien à montrer au client
     this._root.querySelector('.stage-col').hidden = !entry;
     if (!entry) return;
@@ -1300,7 +1937,7 @@ class EmbroideryPreview extends HTMLElement {
     // Mobile : aperçu plus bas pour qu'il reste visible pendant les choix
     const viewH = window.visualViewport?.height || window.innerHeight;
     const maxH = this.clientWidth < 760
-      ? (this._typing ? 120 : Math.max(170, Math.min(viewH * 0.28, 230)))
+      ? (this._typing ? 110 : Math.max(160, Math.min(viewH * 0.26, 220)))
       : Math.max(260, Math.min(window.innerHeight * 0.8, 900));
     const aspect = img.naturalHeight / img.naturalWidth;
     let cssW = availW, cssH = cssW * aspect;
@@ -1319,6 +1956,10 @@ class EmbroideryPreview extends HTMLElement {
 
     // Vue rapprochée : on agrandit virtuellement la photo pour que la zone remplisse l'aperçu,
     // la broderie est alors numérisée et rendue à haute résolution (les fils deviennent visibles).
+    if (photoOnly) {
+      ctx.drawImage(img, 0, 0, W, H);
+      return;
+    }
     const z = pos.zone;
     const scale = this._zoom ? clamp(1 / (1.5 * Math.max(z.w, z.h)), 1, 8) : 1;
     const VW = W * scale, VH = H * scale;
