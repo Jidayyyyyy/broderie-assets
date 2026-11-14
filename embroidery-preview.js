@@ -673,6 +673,7 @@ canvas { display:block; max-width:100%; }
   letter-spacing:.03em; padding:0 16px; min-height:44px; border:1px solid var(--ep-line); border-radius:999px;
   background:var(--ep-surface); color:var(--ep-ink); cursor:pointer; box-shadow:0 1px 3px rgba(91,77,67,.14); }
 .zoom svg { width:16px; height:16px; flex:none; }
+.zoom[hidden] { display:none; }
 .zoom[aria-pressed="true"] { background:var(--ep-ink); color:var(--ep-surface); border-color:var(--ep-ink); }
 .status { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:13px; white-space:nowrap; padding:6px 12px; border-radius:999px;
   background:var(--ep-surface); color:var(--ep-muted); box-shadow:0 1px 3px rgba(91,77,67,.14); pointer-events:none; }
@@ -998,6 +999,8 @@ class EmbroideryPreview extends HTMLElement {
     this._qty = 1;
     this._ctf = {};
     this._photo = null;
+    // Photo du coloris choisi quand aucune zone n'y est dessinée : la broderie y est posée avec la zone d'une autre photo de coloris
+    this._viewImage = null;
     this._shopStatus = { busy: false, error: '' };
   }
 
@@ -1128,6 +1131,26 @@ class EmbroideryPreview extends HTMLElement {
   }
 
   _position() { return this._positions().find((p) => p.id === this._state.positionId) || this._positions()[0]; }
+  _img(p) { return p.image || this._config.image; }
+  // Photo de l'aperçu personnalisé
+  _viewUrl() { return this._viewImage || this._img(this._position()); }
+  // Photos liées aux choix Wix (une photo par coloris…)
+  _choiceMedia() {
+    const shop = this._config.shop;
+    return new Set(shop ? shop.options.flatMap((o) => o.choices.map((ch) => ch.media)).filter(Boolean) : []);
+  }
+  // Zones dessinées sur les photos des choix (une zone par photo de coloris) : l'aperçu suit le coloris choisi
+  _linked() {
+    const media = this._choiceMedia();
+    return media.size > 0 && this._config.positions.some((p) => media.has(this._img(p)));
+  }
+  // Emplacements proposés au client : avec une photo par coloris, seulement ceux de la photo affichée
+  _visiblePositions() {
+    if (!this._linked()) return this._positions();
+    if (this._viewImage) return [this._position()];
+    const url = this._viewUrl();
+    return this._positions().filter((p) => this._img(p) === url);
+  }
   _size() { return SIZES.find((s) => s.id === this._state.sizeId) || SIZES[1]; }
   _lines() { return this._state.text.split('\n').map((l) => l.trim()).filter(Boolean); }
 
@@ -1167,18 +1190,20 @@ class EmbroideryPreview extends HTMLElement {
     this._thumbs.addEventListener('click', (e) => {
       const b = e.target.closest('.thumb-btn');
       if (!b) return;
-      // Vue d'une zone : retour à l'aperçu de la personnalisation ; autre photo : affichée telle quelle
-      const img = (p) => p.image || this._config.image;
-      const pos = this._config.positions.find((p) => img(p) === b.dataset.url);
-      if (pos) {
+      // Vignette « Aperçu » ou photo avec une zone : aperçu de la personnalisation ; autre photo : affichée telle quelle
+      const img = (p) => this._img(p);
+      const pos = !b.dataset.preview && this._config.positions.find((p) => img(p) === b.dataset.url);
+      if (b.dataset.preview) {
         this._photo = null;
+      } else if (pos) {
+        this._photo = null;
+        this._viewImage = null;
         if (img(this._position()) !== b.dataset.url) this._state = { ...this._state, positionId: (this._positions().find((p) => img(p) === b.dataset.url) || pos).id };
-        this._syncControls();
         this._emitChange();
       } else {
         this._photo = b.dataset.url;
       }
-      this._syncShop();
+      this._syncControls();
       this._schedule();
     });
     this._zoomBtn.addEventListener('click', () => {
@@ -1200,6 +1225,7 @@ class EmbroideryPreview extends HTMLElement {
       const btn = e.target.closest('button[data-group]');
       if (!btn) return;
       this._photo = null;
+      if (btn.dataset.group === 'positionId') this._viewImage = null;
       this._state = { ...this._state, [btn.dataset.group]: btn.dataset.id };
       this._state.positionId = this._position().id;
       this._syncControls();
@@ -1271,6 +1297,8 @@ class EmbroideryPreview extends HTMLElement {
 
   _buildControls() {
     const c = this._config;
+    // Le HTML est recréé : le prix et la ligne PayPal doivent être réécrits
+    this._priceHtml = this._ppHtml = undefined;
     if (c.accent) this.style.setProperty('--ep-accent', c.accent);
     this._root.querySelector('.caption').textContent = c.caption;
     this._live = this._root.querySelector('.live');
@@ -1399,13 +1427,17 @@ class EmbroideryPreview extends HTMLElement {
 
     this._controls.querySelectorAll('.tech-dtf').forEach((el) => { el.hidden = !dtf; });
     this._controls.querySelectorAll('.tech-broderie').forEach((el) => { el.hidden = dtf; });
-    const allowed = new Set(this._positions().map((p) => p.id));
+    const visible = this._visiblePositions();
+    const allowed = new Set(visible.map((p) => p.id));
     this._controls.querySelectorAll('button[data-group="positionId"]').forEach((b) => { b.hidden = !allowed.has(b.dataset.id); });
+    // Un seul emplacement possible : rien à choisir, ni à afficher au client
+    const onePos = visible.length < 2;
+    q('.step-position').hidden = onePos;
     this._controls.querySelectorAll('button[data-group]').forEach((b) => {
       b.setAttribute('aria-pressed', String(s[b.dataset.group] === b.dataset.id));
     });
 
-    const where = pos.view ? `${pos.label} (${pos.view})` : pos.label;
+    const where = onePos ? '' : pos.view ? `${pos.label} (${pos.view})` : pos.label;
     const values = { technique: technique.label, position: where, font: font.label, size: size.label };
     this._controls.querySelectorAll('[data-value]').forEach((el) => { el.textContent = values[el.dataset.value] || ''; });
 
@@ -1445,7 +1477,7 @@ class EmbroideryPreview extends HTMLElement {
     error.hidden = !this._logoError;
 
     // Récapitulatif
-    const rows = c.shop && c.techniques.length < 2 ? [['Emplacement', where]] : [['Technique', technique.label], ['Emplacement', where]];
+    const rows = [...(c.shop && c.techniques.length < 2 ? [] : [['Technique', technique.label]]), ...(where ? [['Emplacement', where]] : [])];
     if (dtf) rows.push(['Logo', this._logo ? this._logo.name : 'À ajouter']);
     else rows.push(['Texte', this._lines().join(' / ') || 'À saisir'], ['Police', font.label],
       ['Couleur du fil', { html: `<i style="background:${escapeHtml(color.hex)}"></i>` }]);
@@ -1456,7 +1488,7 @@ class EmbroideryPreview extends HTMLElement {
     // Résumé d'une ligne sous l'aperçu (mobile)
     this._live.textContent = (dtf
       ? [this._logo?.name || 'Ajoutez votre logo', where]
-      : [this._lines().join(' / ') || 'Saisissez votre texte', font.label, where]).join(' · ');
+      : [this._lines().join(' / ') || 'Saisissez votre texte', font.label, where]).filter(Boolean).join(' · ');
 
     this._drawFontThumbs();
     this._syncShop();
@@ -1539,9 +1571,13 @@ class EmbroideryPreview extends HTMLElement {
     const views = [...new Set(this._config.positions.map((p) => p.image || this._config.image).filter(Boolean))];
     // Vignette légère pour les photos Wix ; les autres adresses sont utilisées telles quelles
     const small = (u) => (/^https:\/\/static\.wixstatic\.com\/media\/[^/]+$/.test(u) ? `${u}/v1/fill/w_128,h_128,q_80/t.jpg` : u);
-    const items = [...views.map((url) => ({ url, tag: 'Aperçu' })), ...shop.media.filter((u) => !views.includes(u)).map((url) => ({ url }))];
+    // Une photo par coloris : une seule vignette « Aperçu » (photo du coloris choisi), puis toutes les photos du produit
+    const items = this._linked()
+      ? [{ url: this._viewUrl(), tag: 'Aperçu', preview: true }, ...shop.media.map((url) => ({ url }))]
+      : [...views.map((url) => ({ url, tag: 'Aperçu' })), ...shop.media.filter((u) => !views.includes(u)).map((url) => ({ url }))];
+    this._small = small;
     this._thumbs.hidden = items.length < 2;
-    this._thumbs.innerHTML = items.map((it, i) => `<button type="button" class="thumb-btn" data-url="${escapeHtml(it.url)}" style="background-image:url('${escapeHtml(small(it.url))}')"
+    this._thumbs.innerHTML = items.map((it, i) => `<button type="button" class="thumb-btn" ${it.preview ? 'data-preview="1"' : ''} data-url="${escapeHtml(it.url)}" style="background-image:url('${escapeHtml(small(it.url))}')"
       aria-label="${it.tag ? 'Aperçu de votre personnalisation' : `Photo ${i + 1}`}">${it.tag ? `<span class="tag">${it.tag}</span>` : ''}</button>`).join('');
   }
 
@@ -1563,11 +1599,43 @@ class EmbroideryPreview extends HTMLElement {
     if (!o) return;
     this._sel = { ...this._sel, [name]: value || undefined };
     this._revalidate();
-    // Photo liée au choix (couleur…) : montrée comme le ferait la fiche Wix
-    const media = o.choices.find((ch) => ch.value === value)?.media;
-    if (media && !this._config.positions.some((p) => (p.image || this._config.image) === media)) this._photo = media;
-    this._syncShop();
+    this._followChoice(o);
+    this._syncControls();
     this._schedule();
+  }
+
+  // Photo liée au choix (coloris…) : l'aperçu passe sur cette photo, broderie comprise, comme la galerie de la fiche Wix
+  _followChoice(changed) {
+    const shop = this._config.shop;
+    const media = (o) => o.choices.find((ch) => ch.value === this._sel[o.name])?.media;
+    // Le coloris prime : choisir ensuite le bois ne remplace pas la photo du coloris choisi
+    const url = shop.options.filter((o) => o.type === 'color').map(media).find(Boolean) || media(changed);
+    if (!url) return;
+    const cur = this._position();
+    const setPos = (p) => {
+      if (p.id === cur.id) return;
+      this._state = { ...this._state, positionId: p.id };
+      this._emitChange();
+    };
+    const onPhoto = this._positions().filter((p) => this._img(p) === url);
+    if (onPhoto.length) {
+      this._photo = null;
+      this._viewImage = null;
+      setPos(onPhoto.find((p) => p.label === cur.label) || onPhoto[0]);
+    } else if (this._linked()) {
+      // Pas de zone sur cette photo : on reprend la zone la plus courante des autres photos de coloris (même cadrage)
+      this._photo = null;
+      this._viewImage = url;
+      const linked = this._choiceMedia();
+      const refs = this._positions().filter((p) => linked.has(this._img(p)));
+      const med = (k) => { const a = refs.map((p) => p.zone[k]).sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+      const m = { x: med('x'), y: med('y'), w: med('w'), h: med('h') };
+      const dist = (p) => Math.abs(p.zone.x - m.x) + Math.abs(p.zone.y - m.y) + Math.abs(p.zone.w - m.w) + Math.abs(p.zone.h - m.h);
+      const best = refs.reduce((a, b) => (dist(b) < dist(a) ? b : a));
+      setPos(refs.includes(cur) && dist(cur) < 0.08 ? cur : best);
+    } else {
+      this._photo = url;
+    }
   }
 
   _onShopClick(e) {
@@ -1779,8 +1847,13 @@ class EmbroideryPreview extends HTMLElement {
     this._syncError();
 
     // Vignettes
-    const shown = this._photo || this._position().image || this._config.image;
-    this._thumbs.querySelectorAll('.thumb-btn').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.url === shown)));
+    const shown = this._photo || this._viewUrl();
+    const pv = this._thumbs.querySelector('.thumb-btn[data-preview]');
+    if (pv && pv.dataset.url !== this._viewUrl()) {
+      pv.dataset.url = this._viewUrl();
+      pv.style.backgroundImage = `url('${this._small(this._viewUrl())}')`;
+    }
+    this._thumbs.querySelectorAll('.thumb-btn').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.preview ? !this._photo : !!this._photo && b.dataset.url === this._photo || !pv && b.dataset.url === shown)));
   }
 
   // Message d'achat (erreur de validation ou échec du panier), affiché près du bouton pressé : bloc d'achat ou barre mobile
@@ -1924,7 +1997,7 @@ class EmbroideryPreview extends HTMLElement {
     if (!this._canvas) return;
     const pos = this._position();
     const photoOnly = !!(this._photo && this._config.shop);
-    const entry = this._getImage(photoOnly ? this._photo : pos.image || this._config.image);
+    const entry = this._getImage(photoOnly ? this._photo : this._viewUrl());
     this._zoomBtn.hidden = photoOnly;
     // Pas de photo configurée : rien à montrer au client
     this._root.querySelector('.stage-col').hidden = !entry;
@@ -1974,7 +2047,7 @@ class EmbroideryPreview extends HTMLElement {
       const lines = this._lines();
       if (lines.length) this._drawEmbroidery(ctx, VW, VH, ox, oy, W, H, pos, lines, entry.cors);
     }
-    if (this.getAttribute('debug') === 'true' && !this._zoom) this._drawZones(ctx, W, H, pos.image || this._config.image);
+    if (this.getAttribute('debug') === 'true' && !this._zoom) this._drawZones(ctx, W, H, this._viewUrl());
     this._drawFontThumbs();
   }
 
