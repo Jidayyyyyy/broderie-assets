@@ -960,6 +960,8 @@ input[type=search] { width:100%; font:inherit; font-size:16px; padding:10px 12px
   .merged .buy > .buy-btn[data-action="cart"] { padding:0 12px; letter-spacing:.01em; }
   .merged .bar-price { font-size:17px; }
   .merged .sticky-bar:not([hidden]) { gap:12px; padding-inline:16px; }
+  /* Place pour la bulle de discussion Wix, fixée en bas à droite de l'écran (réglable par --ep-bar-inset) */
+  .merged .sticky-bar:not([hidden]) { padding-right:var(--ep-bar-inset, 72px); }
   .merged .sticky-bar .btn { flex:1 1 auto; min-width:0; min-height:48px; padding:0 14px; }
 }
 @media (prefers-reduced-motion: no-preference) {
